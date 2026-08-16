@@ -1,0 +1,79 @@
+<!DOCTYPE html>
+<html lang="id">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Trading Analytics Dashboard</title>
+    <script src="https://unpkg.com/lightweight-charts/dist/lightweight-charts.standalone.production.js"></script>
+    <style>
+        body { font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; background: #12141d; color: #fff; margin: 0; padding: 20px; }
+        .container { max-width: 1000px; margin: 0 auto; }
+        .card { background: #1e222d; padding: 20px; border-radius: 10px; margin-bottom: 20px; box-shadow: 0 4px 10px rgba(0,0,0,0.3); }
+        .btn-group { margin-bottom: 15px; }
+        .btn { background: #2962ff; color: white; border: none; padding: 10px 20px; font-weight: bold; border-radius: 5px; cursor: pointer; margin-right: 10px; }
+        .btn.active { background: #00b0ff; border: 2px solid #fff; }
+        .status { font-size: 24px; font-weight: bold; }
+        .buy { color: #0ecb81; }
+        .sell { color: #f6465d; }
+        .neutral { color: #9b9b9b; }
+        #chart { height: 400px; width: 100%; }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <div class="card">
+            <div class="btn-group">
+                <button class="btn active" onclick="switchPair('BTCUSD', this)">BTC/USD</button>
+                <button class="btn" onclick="switchPair('XAUUSD', this)">XAU/USD</button>
+            </div>
+            <h2 id="asset-title">⚡ BTC/USD Analytics</h2>
+            <div id="signal-box" class="status neutral">SIGNAL: LOADING...</div>
+            <p id="reason-box">Analisis indikator sedang memproses...</p>
+            <p><strong>Harga Real-time:</strong> $<span id="price">-</span> | <strong>RSI:</strong> <span id="rsi">-</span></p>
+        </div>
+        <div class="card">
+            <div id="chart"></div>
+        </div>
+    </div>
+
+    <script>
+        let currentPair = 'BTCUSD';
+        const chart = LightweightCharts.createChart(document.getElementById('chart'), {
+            layout: { backgroundColor: '#1e222d', textColor: '#d1d4dc' },
+            grid: { vertLines: { color: '#2B2B43' }, horzLines: { color: '#2B2B43' } }
+        });
+        const candleSeries = chart.addCandlestickSeries();
+
+        function switchPair(pair, btn) {
+            currentPair = pair;
+            document.querySelectorAll('.btn').forEach(b => b.classList.remove('active'));
+            btn.classList.add('active');
+            document.getElementById('asset-title').innerText = `⚡ ${pair.replace('USD', '/USD')} Analytics`;
+            updateDashboard();
+        }
+
+        async function updateDashboard() {
+            try {
+                const res = await fetch(`/api/signals?pair=${currentPair}`);
+                const data = await res.json();
+                
+                candleSeries.setData(data.candles);
+                
+                const signalBox = document.getElementById('signal-box');
+                signalBox.innerText = `SIGNAL: ${data.signal}`;
+                signalBox.className = 'status ' + (data.signal.includes('BUY') ? 'buy' : data.signal.includes('SELL') ? 'sell' : 'neutral');
+                
+                document.getElementById('reason-box').innerText = `Reason: ${data.reason}`;
+                document.getElementById('price').innerText = data.price;
+                document.getElementById('rsi').innerText = data.rsi;
+            } catch (e) {
+                console.error(e);
+            }
+        }
+
+        setInterval(updateDashboard, 5000);
+        updateDashboard();
+    </script>
+</body>
+</html>
+
