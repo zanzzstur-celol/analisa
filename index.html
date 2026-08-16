@@ -4,31 +4,30 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Trading Analytics Dashboard</title>
-    <script src="https://unpkg.com/lightweight-charts/dist/lightweight-charts.standalone.production.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/lightweight-charts@3.8.0/dist/lightweight-charts.standalone.production.js"></script>
     <style>
-        body { font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; background: #12141d; color: #fff; margin: 0; padding: 20px; }
+        body { font-family: 'Segoe UI', sans-serif; background: #12141d; color: #fff; margin: 0; padding: 20px; }
         .container { max-width: 1000px; margin: 0 auto; }
-        .card { background: #1e222d; padding: 20px; border-radius: 10px; margin-bottom: 20px; box-shadow: 0 4px 10px rgba(0,0,0,0.3); }
-        .btn-group { margin-bottom: 15px; }
+        .card { background: #1e222d; padding: 20px; border-radius: 10px; margin-bottom: 20px; }
         .btn { background: #2962ff; color: white; border: none; padding: 10px 20px; font-weight: bold; border-radius: 5px; cursor: pointer; margin-right: 10px; }
         .btn.active { background: #00b0ff; border: 2px solid #fff; }
         .status { font-size: 24px; font-weight: bold; }
         .buy { color: #0ecb81; }
         .sell { color: #f6465d; }
         .neutral { color: #9b9b9b; }
-        #chart { height: 400px; width: 100%; }
+        #chart { height: 400px; width: 100%; background: #1e222d; }
     </style>
 </head>
 <body>
     <div class="container">
         <div class="card">
-            <div class="btn-group">
+            <div style="margin-bottom: 15px;">
                 <button class="btn active" onclick="switchPair('BTCUSD', this)">BTC/USD</button>
                 <button class="btn" onclick="switchPair('XAUUSD', this)">XAU/USD</button>
             </div>
             <h2 id="asset-title">⚡ BTC/USD Analytics</h2>
             <div id="signal-box" class="status neutral">SIGNAL: LOADING...</div>
-            <p id="reason-box">Analisis indikator sedang memproses...</p>
+            <p id="reason-box">Menganalisis pergerakan harga...</p>
             <p><strong>Harga Real-time:</strong> $<span id="price">-</span> | <strong>RSI:</strong> <span id="rsi">-</span></p>
         </div>
         <div class="card">
@@ -40,7 +39,8 @@
         let currentPair = 'BTCUSD';
         const PAIR_MAP = { 'BTCUSD': 'BTCUSDT', 'XAUUSD': 'PAXGUSDT' };
 
-        const chart = LightweightCharts.createChart(document.getElementById('chart'), {
+        const chartContainer = document.getElementById('chart');
+        const chart = LightweightCharts.createChart(chartContainer, {
             layout: { backgroundColor: '#1e222d', textColor: '#d1d4dc' },
             grid: { vertLines: { color: '#2B2B43' }, horzLines: { color: '#2B2B43' } }
         });
@@ -80,7 +80,10 @@
         async function updateDashboard() {
             try {
                 let symbol = PAIR_MAP[currentPair];
-                let res = await fetch(`https://api.binance.com/api/v3/klines?symbol=${symbol}&interval=5m&limit=100`);
+                let targetUrl = `https://api.binance.com/api/v3/klines?symbol=${symbol}&interval=5m&limit=100`;
+                let proxyUrl = `https://corsproxy.io/?` + encodeURIComponent(targetUrl);
+                
+                let res = await fetch(proxyUrl);
                 let rawData = await res.json();
 
                 let candles = [];
@@ -105,14 +108,14 @@
                 let bb = calculateBollinger(closes);
 
                 let signal = "NEUTRAL";
-                let reason = "Pasar berada di area konsolidasi / normal.";
+                let reason = "Pasar dalam area wajar / konsolidasi.";
 
                 if (currentPrice <= bb.lower && rsi < 40) {
                     signal = "BUY / CALL 🟢";
-                    reason = "Harga tembus Lower BB + RSI Oversold.";
+                    reason = "Oversold di Lower BB + RSI Rendah.";
                 } else if (currentPrice >= bb.upper && rsi > 60) {
                     signal = "SELL / PUT 🔴";
-                    reason = "Harga tembus Upper BB + RSI Overbought.";
+                    reason = "Overbought di Upper BB + RSI Tinggi.";
                 }
 
                 let signalBox = document.getElementById('signal-box');
@@ -123,8 +126,8 @@
                 document.getElementById('price').innerText = currentPrice;
                 document.getElementById('rsi').innerText = rsi;
             } catch (e) {
-                console.error("Fetch Error:", e);
-                document.getElementById('signal-box').innerText = "SIGNAL: ERROR FETCHING DATA";
+                console.error(e);
+                document.getElementById('signal-box').innerText = "SIGNAL: RETRYING...";
             }
         }
 
