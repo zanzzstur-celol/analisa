@@ -1,7 +1,6 @@
 from fastapi import FastAPI
 from fastapi.responses import HTMLResponse
 import requests
-import pandas as pd
 
 app = FastAPI()
 
@@ -10,63 +9,82 @@ PAIR_MAP = {
     "BTCUSD": "BTCUSDT"
 }
 
-def calculate_indicators(df):
-    df['EMA_200'] = df['CLOSE'].ewm(span=200, adjust=False).mean()
-    delta = df['CLOSE'].diff()
-    gain = (delta.where(delta > 0, 0)).rolling(window=14).mean()
-    loss = (-delta.where(delta < 0, 0)).rolling(window=14).mean()
-    rs = gain / loss
-    df['RSI'] = 100 - (100 / (1 + rs))
-    sma = df['CLOSE'].rolling(window=20).mean()
-    std = df['CLOSE'].rolling(window=20).std()
-    df['BB_UPPER'] = sma + (std * 2)
-    df['BB_LOWER'] = sma - (std * 2)
-    return df
+def calculate_rsi(prices, period=14):
+    if len(prices) < period + 1:
+        return 50.0
+    gains = []
+    losses = []
+    for i in range(1, len(prices)):
+        change = prices[i] - prices[i-1]
+        gains.append(max(change, 0))
+        losses.append(max(-change, 0))
+    avg_gain = sum(gains[-period:]) / period
+    avg_loss = sum(losses[-period:]) / period
+    if avg_loss == 0:
+        return 100.0
+    rs = avg_gain / avg_loss
+    return 100.0 - (100.0 / (1.0 + rs))
 
-def get_market_data(symbol="BTCUSDT", interval="5m", limit=100):
-    url = f"https://api.binance.com/api/v3/klines?symbol={symbol}&interval={interval}&limit={limit}"
-    res = requests.get(url, timeout=5).json()
-    data = []
-    for item in res:
-        data.append({
-            "time": int(item[0] / 1000),
-            "open": float(item[1]),
-            "high": float(item[2]),
-            "low": float(item[3]),
-            "close": float(item[4]),
-        })
-    df = pd.DataFrame(data)
-    df.rename(columns={'open':'OPEN', 'high':'HIGH', 'low':'LOW', 'close':'CLOSE'}, inplace=True)
-    df = calculate_indicators(df)
-    return df, data
+def calculate_bollinger(prices, period=20, std_mult=2):
+    if len(prices) < period:
+        return prices[-1], prices[-1]
+    recent = prices[-period:]
+    sma = sum(recent) / period
+    variance = sum((x - sma) ** 2 for x in recent) / period
+    std_dev = variance ** 0.5
+    return sma + (std_dev * std_mult), sma - (std_dev * std_mult)
 
 @app.get("/api/signals")
 def get_signals(pair: str = "BTCUSD"):
     symbol = PAIR_MAP.get(pair.upper(), "BTCUSDT")
-    df, raw_candles = get_market_data(symbol=symbol)
+    url = f"https://api.binance.com/api/v3/klines?symbol={symbol}&interval=5m&limit=100"
     
-    curr = df.iloc[-1]
-    signal = "NEUTRAL"
-    reason = "Menunggu konfirmasi indikator..."
+    try:
+        res = requests.get(url, timeout=5).json()
+        raw_candles = []
+        close_prices = []
 
-    if curr['CLOSE'] <= curr['BB_LOWER'] and curr['RSI'] < 40:
-        signal = "BUY / CALL 🟢"
-        reason = "Oversold di Lower BB + RSI Rendah"
-    elif curr['CLOSE'] >= curr['BB_UPPER'] and curr['RSI'] > 60:
-        signal = "SELL / PUT 🔴"
-        reason = "Overbought di Upper BB + RSI Tinggi"
+        for item in res:
+            close_p = float(item[4])
+            close_prices.append(close_p)
+            raw_candles.append({
+                "time": int(item[0] / 1000),
+                "open": float(item[1]),
+                "high": float(item[2]),
+                "low": float(item[3]),
+                "close": close_p,
+            })
 
-    return {
-        "pair": pair.upper(),
-        "candles": raw_candles,
-        "signal": signal,
-        "reason": reason,
-        "price": curr['CLOSE'],
-        "rsi": round(curr['RSI'], 2)
-    }
+        current_price = close_prices[-1]
+        rsi_val = round(calculate_rsi(close_prices), 2)
+        bb_upper, bb_lower = calculate_bollinger(close_prices)
+
+        signal = "NEUTRAL"
+        reason = "Pasar berada di area konsolidasi / normal."
+
+        if current_price <= bb_lower and rsi_val < 40:
+            signal = "BUY / CALL 🟢"
+            reason = "Harga tembus Lower BB + RSI Oversold."
+        elif current_price >= bb_upper and rsi_val > 60:
+            signal = "SELL / PUT 🔴"
+            reason = "Harga tembus Upper BB + RSI Overbought."
+
+        return {
+            "pair": pair.upper(),
+            "candles": raw_candles,
+            "signal": signal,
+            "reason": reason,
+            "price": current_price,
+            "rsi": rsi_val
+        }
+    except Exception as e:
+        return {"error": str(e), "signal": "ERROR", "reason": "Gagal mengambil data dari Binance", "price": 0, "rsi": 0, "candles": []}
 
 @app.get("/", response_class=HTMLResponse)
 def index():
-    with open("index.html", "r") as f:
-        return f.read()
+    try:
+        with open("index.html", "r") as f:
+            return f.read()
+    except Exception:
+        return "<h1>Index file not found</h1>"
 
