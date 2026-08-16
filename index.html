@@ -38,11 +38,36 @@
 
     <script>
         let currentPair = 'BTCUSD';
+        const PAIR_MAP = { 'BTCUSD': 'BTCUSDT', 'XAUUSD': 'PAXGUSDT' };
+
         const chart = LightweightCharts.createChart(document.getElementById('chart'), {
             layout: { backgroundColor: '#1e222d', textColor: '#d1d4dc' },
             grid: { vertLines: { color: '#2B2B43' }, horzLines: { color: '#2B2B43' } }
         });
         const candleSeries = chart.addCandlestickSeries();
+
+        function calculateRSI(closes, period = 14) {
+            if (closes.length < period + 1) return 50;
+            let gains = 0, losses = 0;
+            for (let i = closes.length - period; i < closes.length; i++) {
+                let diff = closes[i] - closes[i - 1];
+                if (diff >= 0) gains += diff;
+                else losses -= diff;
+            }
+            let avgGain = gains / period;
+            let avgLoss = losses / period;
+            if (avgLoss === 0) return 100;
+            let rs = avgGain / avgLoss;
+            return (100 - (100 / (1 + rs))).toFixed(2);
+        }
+
+        function calculateBollinger(closes, period = 20, stdDev = 2) {
+            let slice = closes.slice(-period);
+            let mean = slice.reduce((a, b) => a + b, 0) / period;
+            let variance = slice.reduce((a, b) => a + Math.pow(b - mean, 2), 0) / period;
+            let sd = Math.sqrt(variance);
+            return { upper: mean + (sd * stdDev), lower: mean - (sd * stdDev) };
+        }
 
         function switchPair(pair, btn) {
             currentPair = pair;
@@ -54,20 +79,52 @@
 
         async function updateDashboard() {
             try {
-                const res = await fetch(`/api/signals?pair=${currentPair}`);
-                const data = await res.json();
-                
-                candleSeries.setData(data.candles);
-                
-                const signalBox = document.getElementById('signal-box');
-                signalBox.innerText = `SIGNAL: ${data.signal}`;
-                signalBox.className = 'status ' + (data.signal.includes('BUY') ? 'buy' : data.signal.includes('SELL') ? 'sell' : 'neutral');
-                
-                document.getElementById('reason-box').innerText = `Reason: ${data.reason}`;
-                document.getElementById('price').innerText = data.price;
-                document.getElementById('rsi').innerText = data.rsi;
+                let symbol = PAIR_MAP[currentPair];
+                let res = await fetch(`https://api.binance.com/api/v3/klines?symbol=${symbol}&interval=5m&limit=100`);
+                let rawData = await res.json();
+
+                let candles = [];
+                let closes = [];
+
+                rawData.forEach(item => {
+                    let closePrice = parseFloat(item[4]);
+                    closes.push(closePrice);
+                    candles.push({
+                        time: Math.floor(item[0] / 1000),
+                        open: parseFloat(item[1]),
+                        high: parseFloat(item[2]),
+                        low: parseFloat(item[3]),
+                        close: closePrice
+                    });
+                });
+
+                candleSeries.setData(candles);
+
+                let currentPrice = closes[closes.length - 1];
+                let rsi = calculateRSI(closes);
+                let bb = calculateBollinger(closes);
+
+                let signal = "NEUTRAL";
+                let reason = "Pasar berada di area konsolidasi / normal.";
+
+                if (currentPrice <= bb.lower && rsi < 40) {
+                    signal = "BUY / CALL 🟢";
+                    reason = "Harga tembus Lower BB + RSI Oversold.";
+                } else if (currentPrice >= bb.upper && rsi > 60) {
+                    signal = "SELL / PUT 🔴";
+                    reason = "Harga tembus Upper BB + RSI Overbought.";
+                }
+
+                let signalBox = document.getElementById('signal-box');
+                signalBox.innerText = `SIGNAL: ${signal}`;
+                signalBox.className = 'status ' + (signal.includes('BUY') ? 'buy' : signal.includes('SELL') ? 'sell' : 'neutral');
+
+                document.getElementById('reason-box').innerText = `Reason: ${reason}`;
+                document.getElementById('price').innerText = currentPrice;
+                document.getElementById('rsi').innerText = rsi;
             } catch (e) {
-                console.error(e);
+                console.error("Fetch Error:", e);
+                document.getElementById('signal-box').innerText = "SIGNAL: ERROR FETCHING DATA";
             }
         }
 
